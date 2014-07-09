@@ -1,0 +1,4 @@
+--PowerShell Script for CPU Usage (_Total)
+
+$CPU=Get-WmiObject Win32_PerfFormattedData_PerfOS_Processor | Select-Object Name, PercentProcessorTime
+$CPU | Where {$_.Name -eq "_Total"}
