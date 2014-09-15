@@ -1,0 +1,85 @@
+$CPU=Get-WmiObject Win32_PerfFormattedData_PerfOS_Processor | Select-Object Name, PercentProcessorTime | Where {$_.Name -eq "_Total"}
+if($CPU.PercentProcessorTime -ge "10")
+{
+$CPU.PercentProcessorTime
+Invoke-Sqlcmd  -ServerInstance "SQL INSTANCE NAME HERE" -Query "select * into #tmp from sys.sysprocesses
+go
+
+waitfor delay '00:00:01'
+
+-- wait for a few seconds before running the next statement
+ 
+select t1.cpu - t2.cpu as cpu_diff,
+       t1.physical_io - t2.physical_io as io_diff, db_name(t1.dbid) as 'Database',
+       [Individual Query] = SUBSTRING (qt.text,er.statement_start_offset/2,(
+        CASE WHEN er.statement_end_offset = -1
+	       THEN LEN(CONVERT(NVARCHAR(MAX), qt.text)) * 2
+		ELSE er.statement_end_offset END - er.statement_start_offset)/2)
+	,[Parent Query] = qt.text, er.command, er.wait_time, er.last_wait_Type, er.wait_resource,er.scheduler_id,er.reads,er.writes,er.logical_reads,
+       er.granted_query_memory, t1.login_time,t1.last_batch,t1.status,t1.program_name, t1.loginame
+  into #temp from sys.sysprocesses t1 inner join #tmp t2 on t1.spid = t2.spid 
+  inner join sys.dm_exec_requests er ON  t1.spid = er.session_id
+  OUTER APPLY sys.dm_exec_sql_text(er.sql_handle)as qt
+ where t1.spid = t2.spid
+   and t1.login_time = t2.login_time
+   and t1.ecid = t2.ecid
+   and (t1.cpu - t2.cpu ) > 0
+order by cpu_diff desc
+go
+drop table #tmp
+--select * from #temp
+--drop table #temp
+go
+
+DECLARE @xml NVARCHAR(MAX)
+DECLARE @body NVARCHAR(MAX)
+
+
+SET @xml = CAST(( SELECT [cpu_diff] AS 'td','',[io_diff] AS 'td','',
+       [Database] AS 'td','', [Individual Query] AS 'td','',[Parent Query] AS 'td','',
+	   [command] AS 'td','',[wait_time] AS 'td','',[last_wait_Type] AS 'td','',[wait_resource] AS 'td','',[scheduler_id] AS 'td','',
+	   [reads] AS 'td','',[writes] AS 'td','',[logical_reads] AS 'td','',[granted_query_memory] AS 'td','',[login_time] AS 'td','',
+	   [last_batch] AS 'td','',[status] AS 'td','',[program_name] AS 'td','',[loginame] AS 'td',''
+FROM  #Temp
+FOR XML PATH('tr'), ELEMENTS ) AS NVARCHAR(MAX))
+
+
+SET @body ='<html><body><H3>CPU Utilization at Current Time</H3>
+<table border = 1> 
+<tr>
+<th> cpu_diff </th> <th> io_diff </th> <th> Database </th> <th> Individual Query </th><th> Parent Query </th><th> command </th>
+<th> wait_time </th><th> last_wait_Type </th><th> wait_resource </th><th> scheduler_id </th><th> reads </th><th> writes </th>
+<th> logical_reads </th><th> granted_query_memory </th><th> login_time </th>
+<th> last_batch </th><th> status </th><th> program_name </th><th> loginame </th></tr>'    
+
+ 
+SET @body = @body + @xml +'</table></body></html>'
+
+--select @body
+
+EXEC msdb.dbo.sp_send_dbmail
+@profile_name = 'SMTP MAIL PROFILE HERE', -- replace with your SQL Database Mail Profile 
+@body = @body,
+@body_format ='HTML',
+@recipients = 'EMAIL HERE', -- replace with your email address
+@subject = 'CPU Utilization at Current Time' ;
+
+
+DROP TABLE #Temp" 
+#write-host "TRUE"
+exit
+}
+Else
+{
+$CPU.PercentProcessorTime
+#write-host "False"
+exit
+}
+
+
+
+
+
+
+
+
